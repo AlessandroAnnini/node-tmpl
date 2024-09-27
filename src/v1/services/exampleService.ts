@@ -1,4 +1,6 @@
-import apiClient from '../../utils/apiClient';
+import { createApiClient } from '../../utils/apiClient';
+
+const apiClient = await createApiClient();
 
 /**
  * Fetch data without parameters.
