@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import {
   fetchNoParams,
   fetchWithQuery,
@@ -10,9 +10,9 @@ import {
  * Handler for GET /v1/no-params
  */
 export const getNoParams = async (
-  req: Request,
+  _req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const data = await fetchNoParams();
@@ -28,7 +28,7 @@ export const getNoParams = async (
 export const getWithQuery = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const data = await fetchWithQuery(req.query);
@@ -44,7 +44,7 @@ export const getWithQuery = async (
 export const getWithParams = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { id } = req.params;
@@ -61,7 +61,7 @@ export const getWithParams = async (
 export const postWithBody = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const payload = req.body;

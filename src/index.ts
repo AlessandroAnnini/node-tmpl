@@ -5,7 +5,7 @@ import v1Routes from './v1/routes/exampleRoutes';
 import logger from './config/logger';
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = process.env['PORT'] ? parseInt(process.env['PORT'], 10) : 3000;
 
 // Middlewares
 app.use(express.json());

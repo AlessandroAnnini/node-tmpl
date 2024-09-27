@@ -1,9 +1,9 @@
-import { Request, Response, NextFunction } from 'express';
-import { AnyZodObject } from 'zod';
+import type { Request, Response, NextFunction } from 'express';
+import type { AnyZodObject } from 'zod';
 
 export const validationMiddleware =
   (schema: AnyZodObject) =>
-  (req: Request, res: Response, next: NextFunction) => {
+  (req: Request, _res: Response, next: NextFunction) => {
     try {
       schema.parse({
         body: req.body,
