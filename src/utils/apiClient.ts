@@ -1,5 +1,9 @@
 import axios from 'axios';
-import type { AxiosInstance, AxiosError } from 'axios';
+import type {
+  AxiosInstance,
+  AxiosError,
+  InternalAxiosRequestConfig,
+} from 'axios';
 
 // Endpoint configuration
 const AUTH_URL =
@@ -23,6 +27,9 @@ interface TokenResponse {
 let token: string | null = null;
 let tokenExpiry: number | null = null;
 
+// Define a type for the custom header generator function
+type CustomHeadersGenerator = () => Record<string, string>;
+
 // New token generation
 async function getNewToken(): Promise<string> {
   try {
@@ -39,11 +46,9 @@ async function getNewToken(): Promise<string> {
         },
       },
     );
-
     const { access_token, expires_in } = response.data;
     token = access_token;
     tokenExpiry = Date.now() + expires_in * 1000;
-
     return access_token;
   } catch (error) {
     console.error(
@@ -63,7 +68,9 @@ async function getValidToken(): Promise<string> {
 }
 
 // Axios client creation
-async function createApiClient(): Promise<AxiosInstance> {
+async function createApiClient(
+  customHeadersGenerator?: CustomHeadersGenerator,
+): Promise<AxiosInstance> {
   const accessToken = await getValidToken();
 
   const client = axios.create({
@@ -74,16 +81,43 @@ async function createApiClient(): Promise<AxiosInstance> {
     },
   });
 
-  // Add response interceptor for token refresh
+  // Add request interceptor to ensure token is always valid
+  client.interceptors.request.use(async (config) => {
+    const token = await getValidToken();
+    config.headers['Authorization'] = `Bearer ${token}`;
+
+    // Add custom headers if a generator function is provided
+    if (customHeadersGenerator) {
+      const customHeaders = customHeadersGenerator();
+      Object.assign(config.headers, customHeaders);
+    }
+
+    return config;
+  });
+
+  // Add response interceptor for token refresh and request retry
   client.interceptors.response.use(
     (response) => response,
     async (error: AxiosError) => {
-      if (error.response && error.response.status === 401) {
-        // Token might be expired, try to get a new one
-        const newToken = await getNewToken();
-        if (error.config) {
-          error.config.headers['Authorization'] = `Bearer ${newToken}`;
-          return axios(error.config);
+      const originalRequest = error.config as InternalAxiosRequestConfig & {
+        _retry?: boolean;
+      };
+      if (
+        error.response &&
+        error.response.status === 401 &&
+        !originalRequest._retry
+      ) {
+        originalRequest._retry = true;
+        try {
+          // Token might be expired, get a new one
+          const newToken = await getNewToken();
+          // Update the token in the original request
+          originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+          // Retry the original request with the new token
+          return axios(originalRequest);
+        } catch (refreshError) {
+          // If token refresh fails, reject with the original error
+          return Promise.reject(error);
         }
       }
       return Promise.reject(error);
