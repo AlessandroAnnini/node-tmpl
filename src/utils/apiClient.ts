@@ -5,7 +5,7 @@ import type {
   InternalAxiosRequestConfig,
 } from 'axios';
 
-// Endpoint configuration
+// Environment variable retrieval with default values
 const AUTH_URL =
   process.env['AUTH_URL'] || 'https://workspace-auth.example.com/oauth/token';
 const EXTERNAL_SERVICE_URL =
@@ -13,9 +13,16 @@ const EXTERNAL_SERVICE_URL =
   'https://workspace-api.example.com/api/v1';
 const CLIENT_ID = process.env['CLIENT_ID'];
 const CLIENT_SECRET = process.env['CLIENT_SECRET'];
-const GRANT_TYPE = process.env['GRANT_TYPE']; // M2M authentication Grant type
+const GRANT_TYPE = process.env['GRANT_TYPE']; // M2M authentication grant type
 
-if (!AUTH_URL || !EXTERNAL_SERVICE_URL || !CLIENT_ID || !CLIENT_SECRET) {
+// Validate required environment variables
+if (
+  !AUTH_URL ||
+  !EXTERNAL_SERVICE_URL ||
+  !CLIENT_ID ||
+  !CLIENT_SECRET ||
+  !GRANT_TYPE
+) {
   throw new Error('Missing required environment variables');
 }
 
@@ -27,47 +34,64 @@ interface TokenResponse {
 let token: string | null = null;
 let tokenExpiry: number | null = null;
 
-// Define a type for the custom header generator function
+// Type definition for custom header generator function
 type CustomHeadersGenerator = () => Record<string, string>;
 
-// New token generation
+/**
+ * Fetches a new access token from the authentication server.
+ * Uses URL-encoded data as required by 'application/x-www-form-urlencoded' content type.
+ */
 async function getNewToken(): Promise<string> {
   try {
+    const params = new URLSearchParams();
+    params.append('client_id', CLIENT_ID!);
+    params.append('client_secret', CLIENT_SECRET!);
+    params.append('grant_type', GRANT_TYPE!);
+
     const response = await axios.post<TokenResponse>(
       AUTH_URL,
-      {
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        grant_type: GRANT_TYPE,
-      },
+      params.toString(),
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
       },
     );
+
     const { access_token, expires_in } = response.data;
     token = access_token;
     tokenExpiry = Date.now() + expires_in * 1000;
     return access_token;
   } catch (error) {
     console.error(
-      'Error renewing token:',
+      'Error obtaining new token:',
       error instanceof Error ? error.message : 'Unknown error occurred',
     );
     throw error;
   }
 }
 
-// Verify if the token is valid or expired
+/**
+ * Retrieves a valid access token.
+ * Renews the token if it's expired or about to expire within a 60-second window.
+ */
 async function getValidToken(): Promise<string> {
-  if (!token || !tokenExpiry || Date.now() >= tokenExpiry) {
+  const TOKEN_EXPIRY_BUFFER = 60 * 1000; // 60 seconds buffer
+
+  if (
+    !token ||
+    !tokenExpiry ||
+    Date.now() >= tokenExpiry - TOKEN_EXPIRY_BUFFER
+  ) {
     return await getNewToken();
   }
   return token;
 }
 
-// Axios client creation
+/**
+ * Creates an Axios client instance configured with authentication and custom headers.
+ * Includes interceptors for automatic token renewal and request retrying.
+ */
 async function createApiClient(
   customHeadersGenerator?: CustomHeadersGenerator,
 ): Promise<AxiosInstance> {
@@ -81,10 +105,10 @@ async function createApiClient(
     },
   });
 
-  // Add request interceptor to ensure token is always valid
+  // Request interceptor to ensure the token is always valid
   client.interceptors.request.use(async (config) => {
-    const token = await getValidToken();
-    config.headers['Authorization'] = `Bearer ${token}`;
+    const validToken = await getValidToken();
+    config.headers['Authorization'] = `Bearer ${validToken}`;
 
     // Add custom headers if a generator function is provided
     if (customHeadersGenerator) {
@@ -95,16 +119,19 @@ async function createApiClient(
     return config;
   });
 
-  // Add response interceptor for token refresh and request retry
+  // Response interceptor for token refresh and request retry
   client.interceptors.response.use(
     (response) => response,
     async (error: AxiosError) => {
       const originalRequest = error.config as InternalAxiosRequestConfig & {
         _retry?: boolean;
       };
+
+      // Ensure originalRequest exists and hasn't been retried yet
       if (
         error.response &&
         error.response.status === 401 &&
+        originalRequest &&
         !originalRequest._retry
       ) {
         originalRequest._retry = true;
@@ -113,11 +140,11 @@ async function createApiClient(
           const newToken = await getNewToken();
           // Update the token in the original request
           originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
-          // Retry the original request with the new token
-          return axios(originalRequest);
+          // Retry the original request with the new token using the same client instance
+          return client.request(originalRequest);
         } catch (refreshError) {
           // If token refresh fails, reject with the original error
-          return Promise.reject(error);
+          return Promise.reject(refreshError);
         }
       }
       return Promise.reject(error);
@@ -129,23 +156,27 @@ async function createApiClient(
 
 export { createApiClient };
 
-// // Example of using the client to call Workspace APIs
-// async function fetchWorkspaces() {
-//   try {
-//     const apiClient = await createApiClient();
-//     const response = await apiClient.get('/workspaces');
-//     console.log('Workspace data:', response.data);
-//     return response.data;
-//   } catch (error) {
-//     console.error(
-//       'Error fetching data:',
-//       error instanceof Error ? error.message : 'Unknown error occurred',
-//     );
-//     throw error;
-//   }
-// }
+// Example usage of the client to call Workspace APIs
+// Uncomment the following code to test the API client
 
-// // Execute the example data fetch
-// fetchWorkspaces().catch((error) => {
-//   console.error('Failed to fetch workspaces:', error);
-// });
+/*
+async function fetchWorkspaces() {
+  try {
+    const apiClient = await createApiClient();
+    const response = await apiClient.get('/workspaces');
+    console.log('Workspace data:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error(
+      'Error fetching data:',
+      error instanceof Error ? error.message : 'Unknown error occurred'
+    );
+    throw error;
+  }
+}
+
+// Execute the example data fetch
+fetchWorkspaces().catch((error) => {
+  console.error('Failed to fetch workspaces:', error);
+});
+*/
